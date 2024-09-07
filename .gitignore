@@ -1,3 +1,5 @@
+img/video/
+*.mp4
 data/
 
 # Byte-compiled / optimized / DLL files
