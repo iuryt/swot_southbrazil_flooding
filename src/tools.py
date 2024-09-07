@@ -15,6 +15,180 @@ lonlim = np.array([-51.67, -51.1])
 latlim = np.array([-30.3, -29.83])
 
 
+def parse_station_data(filename):
+    """Reads a file containing station data and returns a dictionary for the first station."""
+
+    station_data = {}
+
+    with open(filename, 'r') as file:
+        for line in file:
+            if line.strip():  # Ignore empty lines
+                key, value = line.split(':')
+                key = key.strip().lower()
+                value = value.strip()
+
+                if key == 'codigo estacao':
+                    value = int(value)
+                elif key in ['latitude', 'longitude', 'altitude']:
+                    value = float(value)
+                elif key in ['data inicial', 'data final']:
+                    value = datetime.strptime(value, '%Y-%m-%d')
+
+                station_data[key] = value
+            else:
+                # Empty line found, stop reading
+                break  
+
+    return station_data
+
+
+
+def scaloa(xc, yc, x, y, t=[], corrlenx=None,corrleny=None, err=None, zc=None):
+    """
+    (Adapted from Filipe Fernandes function)
+    Scalar objective analysis. Interpolates t(x, y) into tp(xc, yc)
+    Assumes spatial correlation function to be isotropic and Gaussian in the
+    form of: C = (1 - err) * np.exp(-d**2 / corrlen**2) where:
+    d : Radial distance from the observations.
+    Parameters
+    ----------
+    corrlen : float
+    Correlation length.
+    err : float
+    Random error variance (epsilon in the papers).
+    Return
+    ------
+    tp : array
+    Gridded observations.
+    ep : array
+    Normalized mean error.
+    Examples
+    --------
+    See https://ocefpaf.github.io/python4oceanographers/blog/2014/10/27/OI/
+    Notes
+    -----
+    The funcion `scaloa` assumes that the user knows `err` and `corrlen` or
+    that these parameters where chosen arbitrary. The usual guess are the
+    first baroclinic Rossby radius for `corrlen` and 0.1 e 0.2 to the sampling
+    error.
+    """
+    corrlen = corrleny
+    xc = xc*( corrleny*1./corrlenx)
+    x = x*(corrleny*1./corrlenx)
+
+    n = len(x)
+    x, y = np.reshape(x, (1, n)), np.reshape(y, (1, n))
+    # Squared distance matrix between the observations.
+    d2 = ((np.tile(x, (n, 1)).T - np.tile(x, (n, 1))) ** 2 +
+    (np.tile(y, (n, 1)).T - np.tile(y, (n, 1))) ** 2)
+    nv = len(xc)
+    xc, yc = np.reshape(xc, (1, nv)), np.reshape(yc, (1, nv))
+    # Squared distance between the observations and the grid points.
+    dc2 = ((np.tile(xc, (n, 1)).T - np.tile(x, (nv, 1))) ** 2 +
+    (np.tile(yc, (n, 1)).T - np.tile(y, (nv, 1))) ** 2)
+    # Correlation matrix between stations (A) and cross correlation (stations
+    # and grid points (C))
+    A = (1 - err) * np.exp(-d2 / corrlen ** 2)
+    C = (1 - err) * np.exp(-dc2 / corrlen ** 2)
+    if 0: # NOTE: If the parameter zc is used (`scaloa2.m`)
+        A = (1 - d2 / zc ** 2) * np.exp(-d2 / corrlen ** 2)
+        C = (1 - dc2 / zc ** 2) * np.exp(-dc2 / corrlen ** 2)
+    # Add the diagonal matrix associated with the sampling error. We use the
+    # diagonal because the error is assumed to be random. This means it just
+    # correlates with itself at the same place.
+    A = A + err * np.eye(len(A))
+    # Gauss-Markov to get the weights that minimize the variance (OI).
+    tp = None
+    ep = 1 - np.sum(C.T * np.linalg.solve(A, C.T), axis=0) / (1 - err)
+    if any(t)==True: ##### was t!=None:
+        t = np.reshape(t, (n, 1))
+        tp = np.dot(C, np.linalg.solve(A, t))
+        #if 0: # NOTE: `scaloa2.m`
+        #  mD = (np.sum(np.linalg.solve(A, t)) /
+        #  np.sum(np.sum(np.linalg.inv(A))))
+        #  t = t - mD
+        #  tp = (C * (np.linalg.solve(A, t)))
+        #  tp = tp + mD * np.ones(tp.shape)
+        return tp, ep
+
+    if any(t)==False: ##### was t==None:
+        print("Computing just the interpolation errors.")
+        #Normalized mean error. Taking the squared root you can get the
+        #interpolation error in percentage.
+        return ep
+        
+def plot_scale_bar(ax, length, x0, y0, linewidth=2, orientation=None):
+    """
+    Plot a scale bar on the map.
+
+    Inputs:
+    ax = the axes to draw the scalebar on
+    length = length of the scalebar in km
+    x0 = the map x location of the scale bar (in projected coordinates)
+    y0 = the map y location of the scale bar (in projected coordinates)
+
+    Keywords:
+    linewidth: thickness of the scale bar (default is 3)
+    orientation: vertical or horizontal (default is vertical)
+
+    """
+
+    km_per_deg_lat = 111.195 # 1 deg lat = 111.195 km
+    km_per_deg_lon = km_per_deg_lat*np.cos(y0*np.pi/180) # 1 deg lon = 111.195*cos(lat) km
+
+    bar_length_deg_lat=length/km_per_deg_lat
+    bar_length_deg_lon=length/km_per_deg_lon
+
+    if orientation == 'horizontal':
+        x=[x0-bar_length_deg_lon/2, x0+bar_length_deg_lon/2]
+        y=[y0, y0]
+    else:
+        x=[x0, x0]
+        y=[y0-bar_length_deg_lat/2, y0+bar_length_deg_lat/2]
+    
+    ax.plot(x, y, markersize = linewidth*2, marker = "|", color = "0.1", linewidth = linewidth, solid_capstyle='butt')
+    ax.text(x0, y0, f"{length} km\n\n", va = "center", fontsize = 8, ha = "center")
+
+
+
+def format_lat_lon_ticks(ax, decimals=1):
+    """
+    Formats the x (longitude) and y (latitude) tick labels on a Matplotlib Axes object 
+    to include degree symbols and N/S or E/W indicators, with special handling for the equator.
+    
+    Args:
+        ax: The Matplotlib Axes object to format.
+        decimals (int): Number of decimal places to display in the tick labels. Defaults to 1.
+    """
+
+    format_string = f".{decimals}f"
+    
+    # Format xtick labels (longitude)
+    xticks = ax.get_xticks()
+    new_xticklabels = []
+    for tick in xticks:
+        if tick < 0:
+            new_xticklabels.append(f"{abs(tick):{format_string}}$^\circ$W")  # West
+        elif tick > 0:
+            new_xticklabels.append(f"{tick:{format_string}}$^\circ$E")  # East
+        else:
+            new_xticklabels.append("0$^\circ$")  # Prime Meridian
+
+    ax.set_xticklabels(new_xticklabels)
+
+    # Format ytick labels (latitude)
+    yticks = ax.get_yticks()
+    new_yticklabels = []
+    for tick in yticks:
+        if tick < 0:
+            new_yticklabels.append(f"{abs(tick):{format_string}}$^\circ$S")  # South
+        elif tick > 0:
+            new_yticklabels.append(f"{tick:{format_string}}$^\circ$N")  # North
+        else:
+            new_yticklabels.append("Eq")  # Equator
+
+    ax.set_yticklabels(new_yticklabels)
+    
 def set_hatch_color(cs, color):
     for collection in cs.collections:
         collection.set_edgecolor(color)

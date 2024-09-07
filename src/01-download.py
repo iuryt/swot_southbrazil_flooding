@@ -13,7 +13,11 @@ import geopandas as gpd
 from shapely.geometry import Polygon, LineString, Point
 import gdown
 
-ee.Initialize()
+try:
+    ee.Initialize()
+except:
+    ee.Authenticate()
+    ee.Initialize()
 
 from tools import download_and_extract_data, load_ana_data
 from tools import lonlim, latlim
@@ -140,7 +144,7 @@ if not os.path.exists(path):
 
 region = ee.Geometry.Rectangle(lonmin, latmin, lonmax, latmax)
 
-filterDate = ("2024-03-01", "2024-04-01")
+filterDate = ("2024-03-01", "2024-04-15")
 CLOUDY_PIXEL_PERCENTAGE = 5
 
 collection = (
@@ -178,11 +182,41 @@ after.attrs["aggregation"] = "median"
 
 after.to_netcdf(os.path.join(path,"after.nc"))
 
+
+
+region = ee.Geometry.Rectangle(-58, -34, -49.5, -26.5)
+
+filterDate = ("2020-01-01", "2024-04-01")
+CLOUDY_PIXEL_PERCENTAGE = 5
+
+collection = (
+    ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+    .filterDate(*filterDate)
+    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", CLOUDY_PIXEL_PERCENTAGE))
+)
+image = collection.median()
+
+before_large = geemap.ee_to_xarray(image, crs="EPSG:4326", scale=0.01, geometry=region).squeeze()
+
+before_large = before_large[["B4", "B3", "B2"]].load()
+
+before_large.attrs["filterDate"] = filterDate
+before_large.attrs["CLOUDY_PIXEL_PERCENTAGE"] = CLOUDY_PIXEL_PERCENTAGE
+before_large.attrs["aggregation"] = "median"
+
+before_large.to_netcdf(os.path.join(path,"before_large.nc"))
+
+
 # srtm
 image = ee.Image('USGS/SRTMGL1_003').select('elevation')
 elevation = geemap.ee_to_xarray(image, crs="EPSG:4326", scale=0.0001, geometry=region).squeeze()
 elevation.to_netcdf(os.path.join(path,"elevation.nc"))
 
+# fabdem
+fabdem = ee.ImageCollection("projects/sat-io/open-datasets/FABDEM")
+image = fabdem.mosaic().setDefaultProjection('EPSG:3857',None,30)
+elevation = geemap.ee_to_xarray(image, crs="EPSG:4326", scale=0.0001, geometry=region).squeeze().rename(b1="elevation")
+elevation.to_netcdf(os.path.join(path,"elevation_fabdem.nc"))
 
 landcover = dataset = ee.ImageCollection("ESA/WorldCover/v100").first()
 landcover = geemap.ee_to_xarray(landcover, crs="EPSG:4326", scale=0.0001, geometry=region).squeeze()
