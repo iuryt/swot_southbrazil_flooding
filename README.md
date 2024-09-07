@@ -8,7 +8,6 @@ The code in this repository supports the research for the paper:
 **Journal:** Geophysical Research Letters  
 **Status:** Submitted
 
-
 ## Overview
 
 The flood in southern Brazil, particularly in Porto Alegre, was a significant event with widespread devastation. This project focuses on:
@@ -19,6 +18,8 @@ The flood in southern Brazil, particularly in Porto Alegre, was a significant ev
 - Analyzing extreme rain events and large-scale atmospheric conditions that contributed to the flood.
 
 ## Datasets
+
+The subset data can be accessed at [Zenodo](https://zenodo.org/records/13730012)
 
 We used a range of datasets to conduct our analysis:
 
