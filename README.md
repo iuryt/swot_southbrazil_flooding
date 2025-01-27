@@ -4,9 +4,9 @@ This repository contains code and resources for analyzing the severe flooding ev
 
 The code in this repository supports the research for the paper:
 
-**Title:** SWOT Satellite Reveals Devastating Flood Impact in Rio Grande do Sul, Brazil  
+**Title:** The May 2024 Flood Disaster in Southern Brazil: Causes, Impacts, and SWOT-based Volume Estimation  
 **Journal:** Geophysical Research Letters  
-**Status:** Submitted
+**Status:** Accepted
 
 ## Overview
 
