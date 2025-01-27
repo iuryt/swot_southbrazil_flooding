@@ -10,7 +10,7 @@ from tqdm import tqdm
 import ee
 import geemap
 import geopandas as gpd
-from shapely.geometry import Polygon, LineString, Point
+from shapely.geometry import Polygon, LineString, Point, box
 import gdown
 
 try:
@@ -52,8 +52,8 @@ for url in urls:
 
 
 fnames = [
-    "../data/external/hydroweb/5-87242000-TERMINAL CATSUL GUAÍBA-2024-07-09.xls",
-    "../data/external/hydroweb/5-87450004-CAIS MAUÁ C6-2024-05-23.xlsx",
+    "../../data/external/hydroweb/5-87242000-TERMINAL CATSUL GUAÍBA-2024-07-09.xls",
+    "../../data/external/hydroweb/5-87450004-CAIS MAUÁ C6-2024-05-23.xlsx",
 ]
 
 ana = []
@@ -63,7 +63,7 @@ for fname in fnames:
     station.append(fname.split("-")[-4])
 ana = xr.concat(ana, "station").assign_coords(station=station)
 
-gdf = gpd.read_file("../data/external/shapefiles/swot_swath/swot_science_orbit_sept2015-v2_swath.shp")
+gdf = gpd.read_file("../../data/external/shapefiles/swot_swath/swot_science_orbit_sept2015-v2_swath.shp")
 
 points = [Point(lon, lat) for lon, lat in zip(ana.longitude, ana.latitude)]  # One inside, one outside, one in the other square
 
@@ -85,7 +85,13 @@ datasets = {
             "doi": "10.5067/SWOT-PIXC-2.0",
         },
     },
+    "opera": {
+        "id": {
+            "short_name": "OPERA_L3_DIST-ALERT-HLS_V1"
+        }
+    }
 }
+
 
 # Define the time range for data acquisition
 time_range = ("2024-01-01", "2024-07-10")
@@ -94,7 +100,7 @@ time_range = ("2024-01-01", "2024-07-10")
 key="swot"
 print(f"{key}\n")
 
-path = f"../data/external/{key}/"
+path = f"../../data/external/{key}/"
 # Create a directory for the current dataset if it doesn't exist
 
 if not os.path.exists(path):
@@ -132,13 +138,59 @@ store = Store(auth)
 # Download data files based on the search results and store them in the specified path
 files = store.get(selected_results, path)
         
-        
 
-        
+key = "opera"
+
+# Define the time range for data acquisition
+time_range = ("2024-05-25", "2024-05-27")
+
+
+results = earthaccess.search_data(
+    **datasets[key]["id"],
+    cloud_hosted = True,
+    temporal = time_range,
+)
+
+points = gpd.GeoDataFrame(
+    {"longitude": ana.longitude, "latitude": ana.latitude},
+    geometry=[Point(xy) for xy in zip(ana.longitude, ana.latitude)],
+    crs="EPSG:4326"  # WGS84 coordinate system
+)
+
+# Create the rectangle polygon (bounding box)
+bounding_box = box(lonlim[0], latlim[0], lonlim[1], latlim[1])
+
+# Create a GeoDataFrame for the bounding box
+bounding_box_gdf = gpd.GeoDataFrame(geometry=[bounding_box], crs="EPSG:4326")
+
+selected_results = []
+for item in tqdm(results):
+    spatial_domain = item["umm"]["SpatialExtent"]["HorizontalSpatialDomain"]
+    if "GPolygons" in list(spatial_domain["Geometry"]):
+        lons, lats = [], []
+        for point in spatial_domain["Geometry"]["GPolygons"][0]["Boundary"]["Points"]:
+            lons.append(point["Longitude"])
+            lats.append(point["Latitude"])
+            
+        lons = [(lon - 360 if lon > 180 else lon) for lon in lons]
+        polygon = Polygon(zip(lons, lats))
+
+        polygon_gdf = gpd.GeoDataFrame(geometry=[polygon], crs="EPSG:4326")
+
+        overlap = polygon_gdf.geometry.intersects(bounding_box_gdf.unary_union).any()
+
+        if overlap:
+            selected_results.append(item)
+
+# Initialize a store object for data retrieval
+store = Store(auth)
+
+# Download data files based on the search results and store them in the specified path
+files = store.get(selected_results, path)
 
 
 # landsat
-path = f"../data/external/landsat/"
+path = f"../../data/external/landsat/"
 if not os.path.exists(path):
     os.mkdir(path)
 
@@ -206,28 +258,34 @@ before_large.attrs["aggregation"] = "median"
 
 before_large.to_netcdf(os.path.join(path,"before_large.nc"))
 
+landcover = dataset = ee.ImageCollection("ESA/WorldCover/v100").first()
+landcover = geemap.ee_to_xarray(landcover, crs="EPSG:4326", scale=0.0001, geometry=region).squeeze()
+landcover.to_netcdf(os.path.join(path,"landcover.nc"))
+
+
+path = f"../../data/external/elevation/"
+if not os.path.exists(path):
+    os.mkdir(path)
+    
+region_small = ee.Geometry.Rectangle(lonmin, latmin, lonmax, latmax)
 
 # srtm
 image = ee.Image('USGS/SRTMGL1_003').select('elevation')
-elevation = geemap.ee_to_xarray(image, crs="EPSG:4326", scale=0.0001, geometry=region).squeeze()
+elevation = geemap.ee_to_xarray(image, crs="EPSG:4326", scale=3*0.0001, geometry=region_small).squeeze()
 elevation.to_netcdf(os.path.join(path,"elevation.nc"))
 
 # fabdem
 fabdem = ee.ImageCollection("projects/sat-io/open-datasets/FABDEM")
 image = fabdem.mosaic().setDefaultProjection('EPSG:3857',None,30)
-elevation = geemap.ee_to_xarray(image, crs="EPSG:4326", scale=0.0001, geometry=region).squeeze().rename(b1="elevation")
+elevation = geemap.ee_to_xarray(image, crs="EPSG:4326", scale=3*0.0001, geometry=region_small).squeeze().rename(b1="elevation")
 elevation.to_netcdf(os.path.join(path,"elevation_fabdem.nc"))
-
-landcover = dataset = ee.ImageCollection("ESA/WorldCover/v100").first()
-landcover = geemap.ee_to_xarray(landcover, crs="EPSG:4326", scale=0.0001, geometry=region).squeeze()
-landcover.to_netcdf(os.path.join(path,"landcover.nc"))
 
 
 #
 folder_id = "13rbfTgkm2BDppESboGL02YJBgT_nwfsV"
 folder_url = f'https://drive.google.com/drive/folders/{folder_id}'
 
-path = f"../data/external/gpm_merra2"
+path = f"../../data/external/gpm_merra2"
 if not os.path.exists(path):
     os.mkdir(path)
 
@@ -250,7 +308,7 @@ for dataset_id in datasets_all:
     dataset_name = dataset_id.replace("/","_")
     dataset = ee.ImageCollection(dataset_id).select(variables).filter(ee.Filter.date("2024-04-01","2024-06-01"))
     ds = geemap.ee_to_xarray(dataset.filterBounds(bbox)).squeeze().transpose("lat","lon","time").sel(lon=slice(*lonlim_sa), lat=slice(*latlim_sa)).load()
-    ds.to_netcdf(f"{path}/{dataset_name}_2024.nc")
+    ds.to_netcdf(f"{path}/../../processed/{dataset_name}_2024.nc")
 
 
 fnames = glob(f"{path}/*.tif")
@@ -297,6 +355,6 @@ for fname in fnames:
         ds = xr.merge(ds_list)        
 
     basename = fname.split("/")[-1].split(".")[0]
-    ds.to_netcdf(f"{path}/{basename}.nc")
+    ds.to_netcdf(f"{path}/../../processed/{basename}.nc")
 
 

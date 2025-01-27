@@ -195,6 +195,14 @@ def set_hatch_color(cs, color):
         collection.set_linewidth(0.) 
         
 
+def count_vertices(geom):
+    if geom.geom_type == 'Polygon':
+        return len(geom.exterior.coords)
+    elif geom.geom_type == 'MultiPolygon':
+        return sum(len(poly.exterior.coords) for poly in geom)
+    else:
+        return None  # Handle non-polygon geometries if present
+        
 def get_band_info(dataset_id):
     """Fetches band information from the Earth Engine Data Catalog.
 
